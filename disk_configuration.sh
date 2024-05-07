@@ -42,14 +42,3 @@ genfstab -U /mnt >> /mnt/etc/fstab
 
 # Chroot into the new system
 arch-chroot /mnt
-
-formate the disk
-mount the disk
-
-install packstrap
-
-# Do the base system install
-pacstrap -K /mnt base linux linux-firmware
-
-# Genarate fstab file
-genfstab -U /mnt >> /mnt/etc/fstab
