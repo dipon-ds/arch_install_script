@@ -4,8 +4,6 @@ TIME_ZONE="Asia/Kuala_Lumpur"
 HOST_NAME="arch"
 USER_PASS="pass"
 
-read -p "Continue? (Y/N): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
-
 # Timezone
 echo "Executing 'ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime'"
 ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
