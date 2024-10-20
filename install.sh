@@ -1,117 +1,189 @@
-# Set the variables appropriately
-# Don't forget to set the variable PASS for admin and user password
+#!/bin/bash
+
+# """
+# Confused between Snapper and Timeshift,
+# So, can't choose BTRFS layout and the
+# function disk_setup is incomplete.
+# """
+
+# Variable Setup
 TIME_ZONE="Asia/Kuala_Lumpur"
 HOST_NAME="arch"
+USER_NAME="black"
+ROOT_PASS="pass"
 USER_PASS="pass"
+DISK="/dev/sda"
 
-# Timezone
-echo "Executing 'ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime'"
+
+
+create_partition() {
+    local SIZE=$1
+    local CONFIRM_WRITE=$2
+
+    FDISK_OUTPUT=$(( 
+    echo n    # Add a new partition
+    echo p    # Primary partition
+    echo      # Default partition number
+    echo      # Default first sector
+    if [ -z "$SIZE" ]; then
+        echo      # Use remaining space if no size is provided
+    else
+        echo +$SIZE  # Set partition size if provided
+    fi
+    if [ "$CONFIRM_WRITE" == "y" ]; then
+        echo w    # Write the changes only if confirmation is provided
+    else
+        echo p    # Prints modifid table
+        echo q    # Quit without saving changes
+    fi
+    ) | fdisk $DISK 2>&1)
+
+    # Step 2: Extract the partition number from the fdisk output (only if written)
+    if [ "$CONFIRM_WRITE" == "y" ]; then
+        PARTITION_NUMBER=$(echo "$FDISK_OUTPUT" | grep -oP '(?<=Created a new partition )[0-9]+')
+
+        # Check if a partition number was found
+        if [ -z "$PARTITION_NUMBER" ]; then
+            echo "Failed to create partition."
+            exit 1
+        fi
+
+        # Full partition path (e.g., /dev/sda1)
+        PARTITION=${DISK}${PARTITION_NUMBER}
+
+        partprobe $DISK
+        echo $PARTITION
+    else
+        # Just show the fdisk output without writing changes
+        echo "$FDISK_OUTPUT"
+    fi
+}
+
+mount_disk() {
+    mount "$ROOT_PARTITION" /mnt
+
+    btrfs subvolume create /mnt/@
+    btrfs subvolume create /mnt/@home
+    btrfs subvolume create /mnt/@log
+    btrfs subvolume create /mnt/@pkg
+
+    umount /mnt
+
+    mount -o noatime,ssd,compress=zstd:3,space_cache=v2,subvol=@ "$ROOT_PARTITION" /mnt
+
+    mkdir -p /boot/efi
+    mount --mkdir "$BOOT_PARTITION" /mnt/boot/efi
+
+    mkdir -p /mnt/home
+    mount -o noatime,ssd,compress=zstd:3,space_cache=v2,subvol=@home "$ROOT_PARTITION" /mnt/home
+
+    mkdir -p /mnt/var/log
+    mount -o noatime,ssd,compress=zstd:3,space_cache=v2,subvol=@log "$ROOT_PARTITION" /mnt/var/log
+
+    mkdir -p /mnt/var/cache/pacman/pkg
+    mount -o noatime,ssd,compress=zstd:3,space_cache=v2,subvol=@pkg "$ROOT_PARTITION" /mnt/var/cache/pacman/pkg
+}
+
+# Setup Disk
+disk_setup() {
+    
+    # Boot Partition
+    # Dry Run
+    create_partition "512M" "n"
+
+    read -p "Do you want to write the changes? (y/n): " CONFIRM_WRITE
+    if [ $CONFIRM_WRITE == "n" ]
+    then
+        exit 1
+    fi
+
+    BOOT_PARTITION=$(create_partition "512M" "y")
+    # Format Boot Partition
+    mkfs.fat -F 32 "$BOOT_PARTITION"
+
+    # root
+    # Dry Run
+    create_partition "" "n"
+
+    read -p "Do you want to write the changes? (y/n): " CONFIRM_WRITE
+    if [ $CONFIRM_WRITE == "n" ]
+    then
+        exit 1
+    fi
+
+    ROOT_PARTITION=$(create_partition "" "y")
+    mkfs.btrfs "$ROOT_PARTITION"
+
+    mount_disk
+}
+
+chroot_setup() {
+arch-chroot /mnt /bin/bash <<EOF
+
+# Set timezone
+echo "Setting timezone..."
+
 ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
-ls -al /etc | grep "localtime"
+hwclock --systohc
 
+# Localization
+echo "Setting locale..."
 
-# Time Setup
-read -p "Time zone selected, Continue to setup time? (Y/N): " confirm
-if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]
-then
-    hwclock --systohc
-    timedatectl set-local-rtc 1 --adjust-system-clock
-    timedatectl
-elif [[ $confirm == [nN] || $confirm == [nN][oO] ]]
-then
-    exit 1
-else
-    echo "Skiping Time Setup"
-fi
+echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
 
+# Set hostname
+echo "Setting hostname..."
 
-# Local Gen
-read -p "Time setup complete, Continue to setup local? (Y/N): " confirm
-if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]
-then
-    echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
-    locale-gen
-    echo "LANG=en_US.UTF-8" > /etc/locale.conf
+echo "$HOST_NAME" > /etc/hostname
 
-    cat /etc/locale.gen
-    cat /etc/locale.conf
-elif [[ $confirm == [nN] || $confirm == [nN][oO] ]]
-then
-    exit 1
-else
-    echo "Skiping setup local"
-fi
+# Set hosts file
+echo "Configuring hosts file..."
 
+cat <<EOL > /etc/hosts
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $HOST_NAME.localdomain    $HOST_NAME
+EOL
 
-# Set the hosts file
-read -p "Local setup complete, Continue to setup hosts? (Y/N): " confirm
-if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]
-then
-    echo "127.0.0.1	localhost
-    ::1		localhost
-    127.0.1.1	$HOST_NAME.localdomain	$HOST_NAME" >> /etc/hosts
+# Set root password
+echo "Setting root password..."
 
-    cat /etc/hosts
-elif [[ $confirm == [nN] || $confirm == [nN][oO] ]]
-then
-    exit 1
-else
-    echo "Skiping setup hosts"
-fi
+echo root:$ROOT_PASS | chpasswd
 
+useradd -m -G wheel $USER_NAME
+echo $USER_NAME:$USER_PASS | chpasswd
 
-# Set the Passwords
-read -p "Hosts setup complete, Continue to setup password? (Y/N): " confirm
-if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]
-then
-    echo "root:$USER_PASS" | chpasswd
+echo "%wheel ALL=(ALL) ALL" >> /etc/sudoers.d/$USER_NAME
 
-    useradd -m -G wheel black
-    echo "black:$USER_PASS" | chpasswd
+# Install bootloader
+echo "Installing bootloader..."
+grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB
+grub-mkconfig -o /boot/grub/grub.cfg
 
-    echo "%wheel ALL=(ALL) ALL" > /etc/sudoers.d/black
-    
-    cat /etc/sudoers.d/black | grep "%wheel ALL=(ALL) ALL"
-elif [[ $confirm == [nN] || $confirm == [nN][oO] ]]
-then
-    exit 1
-else
-    echo "Skiping setup password"
-fi
+systemctl enable NetworkManager
+EOF
+}
 
+main() {
+    # Ceacking Boot Mode
+    cat /sys/firmware/efi/fw_platform_size
 
-# Install and configure grub
-read -p "Password setup complete, Continue to setup Grub? (Y/N): " confirm
-if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]
-then
-    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB
-    
-    grub-mkconfig -o /boot/grub/grub.cfg
+    # Time Setup
+    timedatectl set-ntp true
 
-    ls -al /boot/efi
+    # Disk Setup
+    disk_setup
 
-elif [[ $confirm == [nN] || $confirm == [nN][oO] ]]
-then
-    exit 1
-else
-    echo "Skiping setup GRUB"
-fi
+    pacstrap /mnt base base-devel linux linux-firmware btrfs-progs grub efibootmgr vim networkmanager git
+    genfstab -U /mnt >> /mnt/etc/fstab
 
+    chroot_setup
 
-# Install necessary packages
-pacman -Sy networkmanager # Add other packages as required
+    echo "Unmounting partitions..."
+    umount -R /mnt
+}
 
-# Enable NetworkManager
-read -p "Install complete, Continue to Network Manager Auto Start? (Y/N): " confirm
-if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]
-then
-    systemctl enable NetworkManager
-
-elif [[ $confirm == [nN] || $confirm == [nN][oO] ]]
-then
-    exit 1
-else
-    echo "Skiping setup Network Manager Auto Start"
-fi
-
-exit 1
+# Execute the script
+main "$@"
