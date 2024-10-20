@@ -69,19 +69,19 @@ mount_disk() {
 
     umount /mnt
 
-    mount -o noatime,ssd,compress=zstd:3,space_cache=v2,subvol=@ "$ROOT_PARTITION" /mnt
+    mount -o noatime,ssd,discard=async,compress=zstd:3,space_cache=v2,subvol=@ "$ROOT_PARTITION" /mnt
 
     mkdir -p /boot/efi
     mount --mkdir "$BOOT_PARTITION" /mnt/boot/efi
 
     mkdir -p /mnt/home
-    mount -o noatime,ssd,compress=zstd:3,space_cache=v2,subvol=@home "$ROOT_PARTITION" /mnt/home
+    mount -o noatime,ssd,discard=async,compress=zstd:3,space_cache=v2,subvol=@home "$ROOT_PARTITION" /mnt/home
 
     mkdir -p /mnt/var/log
-    mount -o noatime,ssd,compress=zstd:3,space_cache=v2,subvol=@log "$ROOT_PARTITION" /mnt/var/log
+    mount -o noatime,ssd,discard=async,compress=zstd:3,space_cache=v2,subvol=@log "$ROOT_PARTITION" /mnt/var/log
 
     mkdir -p /mnt/var/cache/pacman/pkg
-    mount -o noatime,ssd,compress=zstd:3,space_cache=v2,subvol=@pkg "$ROOT_PARTITION" /mnt/var/cache/pacman/pkg
+    mount -o noatime,ssd,discard=async,compress=zstd:3,space_cache=v2,subvol=@pkg "$ROOT_PARTITION" /mnt/var/cache/pacman/pkg
 }
 
 # Setup Disk
